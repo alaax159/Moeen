@@ -1,0 +1,1003 @@
+import { Inject, Injectable, NotFoundException } from '@nestjs/common';
+
+import {  and, desc, eq, gte, getTableColumns, ilike, isNull, lte, ne, or } from 'drizzle-orm';
+import { NodePgDatabase } from 'drizzle-orm/node-postgres';
+
+import { DRIZZLE } from '../database.constants';
+import * as schema from '../schema';
+import {
+  AddMedicationDto,
+  DurationOption,
+  MedicationSource,
+} from '../../medications/dto/add-medication.dto';
+import { UpdateMedicationDto } from '../../medications/dto/update-medication.dto';
+import { UpdateNotificationPreferencesDto } from '../../notifications/notification-preferences/dto/update-notification-preferences.dto';
+
+type Database = NodePgDatabase<typeof schema>;
+
+export type CreateMedicationParams = {
+  dailyMedId: string | null;
+  scheduleTimes: string[];
+  startDate: string;
+  endDate: string | null;
+};
+
+type DailyMedUpdate = {
+  dailyMedId: string | null;
+  verified: 'verified' | 'non-verified';
+};
+
+@Injectable()
+export class DatabaseRepository {
+  constructor(
+    @Inject(DRIZZLE)
+    private readonly db: Database,
+  ) {}
+
+  async upsertUserDevice(
+    firebaseUid: string,
+    dto: UpdateNotificationPreferencesDto,
+  ) {
+    const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+    if (!userId) {
+      throw new NotFoundException('User was not found');
+    }
+
+    const [device] = await this.db
+      .insert(schema.userDevice)
+      .values({
+        userId,
+        expoPushToken: dto.expoPushToken,
+        deviceType: dto.deviceType,
+        isActive: dto.isActive ?? true,
+        lastSeenAt: new Date(),
+      })
+      .onConflictDoUpdate({
+        target: schema.userDevice.expoPushToken,
+        set: {
+          userId,
+          deviceType: dto.deviceType,
+          isActive: dto.isActive ?? true,
+          lastSeenAt: new Date(),
+          updatedAt: new Date(),
+        },
+      })
+      .returning();
+
+    return device;
+  }
+
+  searchMedications(searchTerm: string) {
+    return this.db
+      .select()
+      .from(schema.medication)
+      .where(
+        or(
+          ilike(schema.medication.brandName, `%${searchTerm}%`),
+          ilike(schema.medication.genericName, `%${searchTerm}%`),
+        ),
+      );
+  }
+
+  private async getUserIdByFirebaseUid(
+    firebaseUid: string,
+  ): Promise<number | undefined> {
+    const [currentUser] = await this.db
+      .select({ id: schema.user.id })
+      .from(schema.user)
+      .where(eq(schema.user.firebaseUid, firebaseUid))
+      .limit(1);
+
+    return currentUser?.id;
+  }
+
+  async getUserMedications(
+    firebaseUid: string,
+    status?: (typeof schema.userMedicationStatusEnum.enumValues)[number],
+  ) {
+    const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+    if (!userId) {
+      return [];
+    }
+
+    const baseQuery = this.db
+      .select({
+        id: schema.userMedication.id,
+        medicationId: schema.userMedication.medicationId,
+        frequency: schema.userMedication.frequency,
+        dosageAmount: schema.userMedication.dosageAmount,
+        dosageUnit: schema.userMedication.dosageUnit,
+        dosageForm: schema.userMedication.dosageForm,
+        instructions: schema.userMedication.instructions,
+        status: schema.userMedication.status,
+        completion: schema.userMedication.completion,
+        startDate: schema.userMedication.startDate,
+        endDate: schema.userMedication.endDate,
+        createdAt: schema.userMedication.createdAt,
+        brandName: schema.medication.brandName,
+        genericName: schema.medication.genericName,
+      })
+      .from(schema.userMedication)
+      .innerJoin(
+        schema.medication,
+        eq(schema.userMedication.medicationId, schema.medication.id),
+      );
+
+    const statusClause = status
+      ? eq(schema.userMedication.status, status)
+      : ne(schema.userMedication.status, 'archived');
+
+    return baseQuery
+      .where(and(eq(schema.userMedication.userId, userId), statusClause))
+      .orderBy(desc(schema.userMedication.createdAt));
+
+  }
+
+  async archiveUserMedication(id: number, firebaseUid: string) {
+    const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+    if (!userId) {
+      throw new NotFoundException(`user medication ${id} was not found`);
+    }
+
+    const [updated] = await this.db
+      .update(schema.userMedication)
+      .set({ status: 'archived' })
+      .where(
+        and(
+          eq(schema.userMedication.id, id),
+          eq(schema.userMedication.userId, userId),
+        ),
+      )
+      .returning();
+
+    if (!updated) {
+      throw new NotFoundException(`user medication ${id} was not found`);
+    }
+
+    return updated;
+  }
+
+  async insert_user_medication(
+    dto: AddMedicationDto,
+    params: CreateMedicationParams,
+    firebaseUid: string,
+  ) {
+    const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+    if (!userId) {
+      throw new NotFoundException('User was not found');
+    }
+
+    return this.db.transaction(async (tx) => {
+      const medicationId = await this.resolveMedicationId(tx, dto, params);
+
+      const [userMedication] = await tx
+        .insert(schema.userMedication)
+        .values({
+          userId,
+          medicationId,
+          frequency: dto.userMedication.frequency,
+          dosageAmount: String(dto.userMedication.dosageAmount),
+          dosageUnit: dto.userMedication.dosageUnit,
+          dosageForm: dto.userMedication.dosageForm,
+          instructions: dto.userMedication.instructions,
+          ...(dto.userMedication.status
+            ? { status: dto.userMedication.status }
+            : {}),
+          ...(dto.userMedication.completion
+            ? { completion: dto.userMedication.completion }
+            : {}),
+          startDate: params.startDate,
+          endDate: params.endDate,
+        })
+        .returning();
+
+      const scheduleTimes = params.scheduleTimes.length
+        ? await tx
+            .insert(schema.scheduleTime)
+            .values(
+              params.scheduleTimes.map((time) => ({
+                userMedicationId: userMedication.id,
+                time,
+              })),
+            )
+            .returning()
+        : [];
+      return { medicationId, userMedication, scheduleTimes };
+    });
+  }
+
+  async updateUserMedication(
+    id: number,
+    dto: UpdateMedicationDto,
+    firebaseUid: string,
+    dailyMed?: DailyMedUpdate,
+  ) {
+    const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+    if (!userId) {
+      throw new NotFoundException(`user medication ${id} was not found`);
+    }
+
+    return this.db.transaction(async (tx) => {
+      const [current] = await tx
+        .select()
+        .from(schema.userMedication)
+        .where(
+          and(
+            eq(schema.userMedication.id, id),
+            eq(schema.userMedication.userId, userId),
+          ),
+        )
+        .limit(1);
+
+      if (!current) {
+        throw new NotFoundException(`user medication ${id} was not found`);
+      }
+
+      const userMedicationChanges = {
+        ...(dto.frequency !== undefined ? { frequency: dto.frequency } : {}),
+        ...(dto.dosageAmount !== undefined
+          ? { dosageAmount: String(dto.dosageAmount) }
+          : {}),
+        ...(dto.dosageUnit !== undefined ? { dosageUnit: dto.dosageUnit } : {}),
+        ...(dto.dosageForm !== undefined ? { dosageForm: dto.dosageForm } : {}),
+        ...(dto.instructions !== undefined
+          ? { instructions: dto.instructions }
+          : {}),
+        ...(dto.startDate !== undefined ? { startDate: dto.startDate } : {}),
+        ...(dto.durationOption !== undefined
+          ? { endDate: this.resolveUpdateEndDate(current.startDate, dto) }
+          : dto.endDate !== undefined
+            ? { endDate: dto.endDate }
+            : {}),
+      };
+
+      if (Object.keys(userMedicationChanges).length) {
+        await tx
+          .update(schema.userMedication)
+          .set(userMedicationChanges)
+          .where(eq(schema.userMedication.id, id));
+      }
+
+      if (dailyMed) {
+        await tx
+          .update(schema.medication)
+          .set({
+            ...(dto.brandName !== undefined
+              ? { brandName: dto.brandName }
+              : {}),
+            ...(dto.genericName !== undefined
+              ? { genericName: dto.genericName }
+              : {}),
+            ...dailyMed,
+          })
+          .where(eq(schema.medication.id, current.medicationId));
+      }
+
+      if (dto.scheduleTimes !== undefined) {
+        await tx
+          .delete(schema.scheduleTime)
+          .where(eq(schema.scheduleTime.userMedicationId, id));
+
+        if (dto.scheduleTimes.length) {
+          await tx.insert(schema.scheduleTime).values(
+            dto.scheduleTimes.map((time) => ({
+              userMedicationId: id,
+              time,
+            })),
+          );
+        }
+      }
+
+      const [updated] = await tx
+        .select({
+          id: schema.userMedication.id,
+          medicationId: schema.medication.id,
+          brandName: schema.medication.brandName,
+          genericName: schema.medication.genericName,
+          verified: schema.medication.verified,
+          dailyMedId: schema.medication.dailyMedId,
+          dosageAmount: schema.userMedication.dosageAmount,
+          dosageUnit: schema.userMedication.dosageUnit,
+          dosageForm: schema.userMedication.dosageForm,
+          frequency: schema.userMedication.frequency,
+          instructions: schema.userMedication.instructions,
+          startDate: schema.userMedication.startDate,
+          endDate: schema.userMedication.endDate,
+        })
+        .from(schema.userMedication)
+        .innerJoin(
+          schema.medication,
+          eq(schema.userMedication.medicationId, schema.medication.id),
+        )
+        .where(eq(schema.userMedication.id, id));
+
+      const scheduleTimes = await tx
+        .select({ time: schema.scheduleTime.time })
+        .from(schema.scheduleTime)
+        .where(eq(schema.scheduleTime.userMedicationId, id));
+
+      return {
+        ...updated,
+        scheduleTimes: scheduleTimes.map(({ time }) => time),
+      };
+    });
+  }
+
+  private resolveUpdateEndDate(
+    currentStartDate: string,
+    dto: UpdateMedicationDto,
+  ): string | null {
+    if (dto.durationOption === DurationOption.ONGOING) {
+      return null;
+    }
+
+    const end = new Date(`${dto.startDate ?? currentStartDate}T00:00:00.000Z`);
+    switch (dto.durationOption) {
+      case DurationOption.THREE_DAYS:
+        end.setUTCDate(end.getUTCDate() + 3);
+        break;
+      case DurationOption.ONE_WEEK:
+        end.setUTCDate(end.getUTCDate() + 7);
+        break;
+      case DurationOption.TWO_WEEKS:
+        end.setUTCDate(end.getUTCDate() + 14);
+        break;
+      case DurationOption.ONE_MONTH:
+        end.setUTCMonth(end.getUTCMonth() + 1);
+        break;
+      case DurationOption.CUSTOM:
+        end.setUTCDate(end.getUTCDate() + dto.customDays!);
+        break;
+    }
+
+    return end.toISOString().slice(0, 10);
+  }
+
+  private async resolveMedicationId(
+    tx: Database,
+    dto: AddMedicationDto,
+    params: Pick<CreateMedicationParams, 'dailyMedId'>,
+  ): Promise<number> {
+    if (dto.source === MedicationSource.EXISTING_DB) {
+      const [row] = await tx
+        .select()
+        .from(schema.medication)
+        .where(eq(schema.medication.id, dto.medication.id!))
+        .limit(1);
+
+      if (!row) {
+        throw new NotFoundException(
+          `medication ${dto.medication.id} was not found`,
+        );
+      }
+
+      return row.id;
+    }
+
+    if (dto.source === MedicationSource.DAILYMED) {
+      const dailyMedId = params.dailyMedId!;
+
+      const [existing] = await tx
+        .select({ id: schema.medication.id })
+        .from(schema.medication)
+        .where(eq(schema.medication.dailyMedId, dailyMedId))
+        .limit(1);
+
+      if (existing) {
+        return existing.id;
+      }
+
+      const [inserted] = await tx
+        .insert(schema.medication)
+        .values({
+          brandName: dto.medication.brandName,
+          genericName: dto.medication.genericName,
+          verified: 'verified',
+          dailyMedId,
+          description: dto.medication.description,
+        })
+        .onConflictDoNothing({
+          target: schema.medication.dailyMedId,
+        })
+        .returning({ id: schema.medication.id });
+
+      if (inserted) {
+        return inserted.id;
+      }
+
+      const [concurrentExisting] = await tx
+        .select({ id: schema.medication.id })
+        .from(schema.medication)
+        .where(eq(schema.medication.dailyMedId, dailyMedId))
+        .limit(1);
+
+      return concurrentExisting.id;
+    }
+
+    // manual
+    const [inserted] = await tx
+      .insert(schema.medication)
+      .values({
+        brandName: dto.medication.brandName,
+        genericName: dto.medication.genericName,
+        verified: 'non-verified',
+        dailyMedId: null,
+        description: dto.medication.description,
+      })
+      .returning();
+
+    return inserted.id;
+  }
+
+  async getMedicationById(id: number, firebaseUid: string) {
+    const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+    if (!userId) {
+      throw new NotFoundException(`medication ${id} was not found`);
+    }
+
+    const rows = await this.db
+      .select({
+        medication: { ...getTableColumns(schema.medication) },
+        userMedication: { ...getTableColumns(schema.userMedication) },
+        scheduleTime: { ...getTableColumns(schema.scheduleTime) },
+      })
+      .from(schema.medication)
+      .leftJoin(
+        schema.userMedication,
+        eq(schema.userMedication.medicationId, schema.medication.id),
+      )
+      .leftJoin(
+        schema.scheduleTime,
+        eq(schema.scheduleTime.userMedicationId, schema.userMedication.id),
+      )
+      .where(
+        and(
+          eq(schema.userMedication.id, id),
+          eq(schema.userMedication.userId, userId),
+        ),
+      );
+
+    if (!rows.length) {
+      throw new NotFoundException(`medication ${id} was not found`);
+    }
+    return rows;
+  }
+async getTodayMedications(firebaseUid: string) {
+  const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+  if (!userId) {
+    return [];
+  }
+
+  const today = this.getTodayDateInPalestine();
+  const currentTime = this.getCurrentTimeInPalestine();
+
+  const rows = await this.db
+    .select({
+      id: schema.userMedication.id,
+      frequency: schema.userMedication.frequency,
+      dosageAmount: schema.userMedication.dosageAmount,
+      dosageUnit: schema.userMedication.dosageUnit,
+      dosageForm: schema.userMedication.dosageForm,
+      instructions: schema.userMedication.instructions,
+      brandName: schema.medication.brandName,
+      genericName: schema.medication.genericName,
+      scheduleTimeId: schema.scheduleTime.id,
+      time: schema.scheduleTime.time,
+      doseLogStatus: schema.doseLog.status,
+    })
+
+    .from(schema.userMedication)
+    .innerJoin(
+      schema.medication,
+      eq(schema.userMedication.medicationId, schema.medication.id),
+    )
+    .innerJoin(
+      schema.scheduleTime,
+      eq(schema.scheduleTime.userMedicationId, schema.userMedication.id),
+    )
+    .leftJoin(
+      schema.doseLog,
+      and(
+        eq(schema.doseLog.scheduleTimeId, schema.scheduleTime.id),
+        eq(schema.doseLog.date, today),
+      ),
+    )
+    .where(
+      and(
+        eq(schema.userMedication.userId, userId),
+        eq(schema.userMedication.status, 'active'),
+        lte(schema.userMedication.startDate, today),
+        or(
+          isNull(schema.userMedication.endDate),
+          gte(schema.userMedication.endDate, today),
+        ),
+      ),
+    );
+
+  const grouped = new Map<number, any>();
+
+  for (const row of rows) {
+    if (!grouped.has(row.id)) {
+      grouped.set(row.id, {
+        id: row.id,
+        brandName: row.brandName,
+        genericName: row.genericName,
+        dosageAmount: row.dosageAmount,
+        dosageUnit: row.dosageUnit,
+        dosageForm: row.dosageForm,
+        frequency: row.frequency,
+        instructions: row.instructions,
+        todaySchedule: [],
+        summary: { taken: 0, upcoming: 0, missed: 0, skipped: 0 },
+      });
+    }
+
+    const status =
+      row.doseLogStatus ?? (row.time <= currentTime ? 'missed' : 'upcoming');
+
+    const entry = grouped.get(row.id);
+    entry.todaySchedule.push({
+      scheduleTimeId: row.scheduleTimeId,
+      time: row.time,
+      status,
+    });
+    entry.summary[status]++;
+  }
+
+  return Array.from(grouped.values());
+}
+
+async getAdherenceSummary(firebaseUid: string) {
+  const today = this.getTodayDateInPalestine();
+  const currentTime = this.getCurrentTimeInPalestine();
+
+  const shiftDate = (date: string, days: number): string => {
+    const [year, month, day] = date.split('-').map(Number);
+
+    const value = new Date(
+      Date.UTC(year, month - 1, day),
+    );
+
+    value.setUTCDate(value.getUTCDate() + days);
+
+    return value.toISOString().slice(0, 10);
+  };
+
+  const startDate = shiftDate(today, -6);
+
+  const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+  if (!userId) {
+    return {
+      startDate,
+      endDate: today,
+      taken: 0,
+      scheduled: 0,
+      percentage: 0,
+      streak: 0,
+    };
+  }
+
+  const scheduleRows = await this.db
+    .select({
+      scheduleTimeId: schema.scheduleTime.id,
+      time: schema.scheduleTime.time,
+      medicationStartDate: schema.userMedication.startDate,
+      medicationEndDate: schema.userMedication.endDate,
+    })
+    .from(schema.scheduleTime)
+    .innerJoin(
+      schema.userMedication,
+      eq(
+        schema.scheduleTime.userMedicationId,
+        schema.userMedication.id,
+      ),
+    )
+    .where(
+      and(
+        eq(schema.userMedication.userId, userId),
+        lte(schema.userMedication.startDate, today),
+        or(
+          isNull(schema.userMedication.endDate),
+          gte(schema.userMedication.endDate, startDate),
+        ),
+      ),
+    );
+
+  const doseLogs = await this.db
+    .select({
+      scheduleTimeId: schema.doseLog.scheduleTimeId,
+      date: schema.doseLog.date,
+      status: schema.doseLog.status,
+    })
+    .from(schema.doseLog)
+    .innerJoin(
+      schema.scheduleTime,
+      eq(schema.doseLog.scheduleTimeId, schema.scheduleTime.id),
+    )
+    .innerJoin(
+      schema.userMedication,
+      eq(schema.scheduleTime.userMedicationId, schema.userMedication.id),
+    )
+    .where(
+      and(
+        eq(schema.userMedication.userId, userId),
+        gte(schema.doseLog.date, startDate),
+        lte(schema.doseLog.date, today),
+      ),
+    );
+
+  const doseLogMap = new Map<
+    string,
+    (typeof doseLogs)[number]['status']
+  >();
+
+  for (const log of doseLogs) {
+    doseLogMap.set(
+      `${log.scheduleTimeId}-${log.date}`,
+      log.status,
+    );
+  }
+
+  let scheduled = 0;
+  let taken = 0;
+
+  const dailySummary: {
+    date: string;
+    scheduled: number;
+    taken: number;
+  }[] = [];
+
+  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+    const date = shiftDate(startDate, dayOffset);
+
+    let dailyScheduled = 0;
+    let dailyTaken = 0;
+
+    for (const schedule of scheduleRows) {
+      const medicationActive =
+        schedule.medicationStartDate <= date &&
+        (
+          schedule.medicationEndDate === null ||
+          schedule.medicationEndDate >= date
+        );
+
+      if (!medicationActive) {
+        continue;
+      }
+
+      if (
+        date === today &&
+        schedule.time > currentTime
+      ) {
+        continue;
+      }
+
+      dailyScheduled++;
+      scheduled++;
+
+      const status = doseLogMap.get(
+        `${schedule.scheduleTimeId}-${date}`,
+      );
+
+      if (status === 'taken') {
+        dailyTaken++;
+        taken++;
+      }
+    }
+
+    dailySummary.push({
+      date,
+      scheduled: dailyScheduled,
+      taken: dailyTaken,
+    });
+  }
+
+  const percentage =
+    scheduled === 0
+      ? 0
+      : Math.round((taken / scheduled) * 100);
+
+  let streak = 0;
+
+  for (let index = dailySummary.length - 2; index >= 0; index--) {
+    const day = dailySummary[index];
+
+    if (day.scheduled === 0) {
+      break;
+    }
+
+    if (day.taken !== day.scheduled) {
+      break;
+    }
+
+    streak++;
+  }
+
+  return {
+    startDate,
+    endDate: today,
+    taken,
+    scheduled,
+    percentage,
+    streak,
+  };
+}
+
+async getWeeklyDoses(firebaseUid: string) {
+  const today = this.getTodayDateInPalestine();
+  const currentTime = this.getCurrentTimeInPalestine();
+
+  const shiftDate = (date: string, days: number): string => {
+    const [year, month, day] = date.split('-').map(Number);
+
+    const value = new Date(Date.UTC(year, month - 1, day));
+    value.setUTCDate(value.getUTCDate() + days);
+
+    return value.toISOString().slice(0, 10);
+  };
+
+  const startDate = shiftDate(today, -6);
+
+  const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+  if (!userId) {
+    return {
+      startDate,
+      endDate: today,
+      days: Array.from({ length: 7 }, (_, index) => ({
+        date: shiftDate(startDate, index),
+        scheduled: 0,
+        taken: 0,
+        missed: 0,
+        skipped: 0,
+      })),
+    };
+  }
+
+  const scheduleRows = await this.db
+    .select({
+      scheduleTimeId: schema.scheduleTime.id,
+      time: schema.scheduleTime.time,
+      medicationStartDate: schema.userMedication.startDate,
+      medicationEndDate: schema.userMedication.endDate,
+    })
+    .from(schema.scheduleTime)
+    .innerJoin(
+      schema.userMedication,
+      eq(
+        schema.scheduleTime.userMedicationId,
+        schema.userMedication.id,
+      ),
+    )
+    .where(
+      and(
+        eq(schema.userMedication.userId, userId),
+        lte(schema.userMedication.startDate, today),
+        or(
+          isNull(schema.userMedication.endDate),
+          gte(schema.userMedication.endDate, startDate),
+        ),
+      ),
+    );
+
+  const doseLogs = await this.db
+    .select({
+      scheduleTimeId: schema.doseLog.scheduleTimeId,
+      date: schema.doseLog.date,
+      status: schema.doseLog.status,
+    })
+    .from(schema.doseLog)
+    .innerJoin(
+      schema.scheduleTime,
+      eq(schema.doseLog.scheduleTimeId, schema.scheduleTime.id),
+    )
+    .innerJoin(
+      schema.userMedication,
+      eq(
+        schema.scheduleTime.userMedicationId,
+        schema.userMedication.id,
+      ),
+    )
+    .where(
+      and(
+        eq(schema.userMedication.userId, userId),
+        gte(schema.doseLog.date, startDate),
+        lte(schema.doseLog.date, today),
+      ),
+    );
+
+  const doseLogMap = new Map<
+    string,
+    (typeof doseLogs)[number]['status']
+  >();
+
+  for (const log of doseLogs) {
+    doseLogMap.set(
+      `${log.scheduleTimeId}-${log.date}`,
+      log.status,
+    );
+  }
+
+  const days: {
+  date: string;
+  scheduled: number;
+  taken: number;
+  missed: number;
+  skipped: number;
+}[] = [];
+
+  for (let dayOffset = 0; dayOffset < 7; dayOffset++) {
+    const date = shiftDate(startDate, dayOffset);
+
+    let scheduled = 0;
+    let taken = 0;
+    let missed = 0;
+    let skipped = 0;
+
+    for (const schedule of scheduleRows) {
+      const medicationActive =
+        schedule.medicationStartDate <= date &&
+        (
+          schedule.medicationEndDate === null ||
+          schedule.medicationEndDate >= date
+        );
+
+      if (!medicationActive) {
+        continue;
+      }
+
+      if (date === today && schedule.time > currentTime) {
+        continue;
+      }
+
+      scheduled++;
+
+      const status = doseLogMap.get(
+        `${schedule.scheduleTimeId}-${date}`,
+      );
+
+      if (status === 'taken') {
+        taken++;
+      } else if (status === 'skipped') {
+        skipped++;
+      } else {
+        missed++;
+      }
+    }
+
+    days.push({
+      date,
+      scheduled,
+      taken,
+      missed,
+      skipped,
+    });
+  }
+
+  return {
+    startDate,
+    endDate: today,
+    days,
+  };
+}
+
+private getTodayDateInPalestine(): string {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Jerusalem' });
+}
+
+private getCurrentTimeInPalestine(): string {
+  return new Date().toLocaleTimeString('en-GB', {
+    timeZone: 'Asia/Jerusalem',
+    hour12: false,
+  });
+}
+async getScheduleTimesForUserMedication(userMedicationId: number) {
+  const [userMedication] = await this.db
+    .select({
+      id: schema.userMedication.id,
+      userId: schema.userMedication.userId,
+      status: schema.userMedication.status,
+      startDate: schema.userMedication.startDate,
+      endDate: schema.userMedication.endDate,
+    })
+    .from(schema.userMedication)
+    .where(eq(schema.userMedication.id, userMedicationId))
+    .limit(1);
+
+  if (!userMedication) {
+    return null;
+  }
+
+  const scheduleTimes = await this.db
+    .select({
+      scheduleTimeId: schema.scheduleTime.id,
+      time: schema.scheduleTime.time,
+    })
+    .from(schema.scheduleTime)
+    .where(eq(schema.scheduleTime.userMedicationId, userMedicationId));
+
+  return { userMedication, scheduleTimes };
+}
+
+async getAllActiveUserMedicationIds(): Promise<number[]> {
+  const rows = await this.db
+    .select({ id: schema.userMedication.id })
+    .from(schema.userMedication)
+    .where(eq(schema.userMedication.status, 'active'));
+
+  return rows.map((row) => row.id);
+}
+
+async markDoseStatus(
+  scheduleTimeId: number,
+  status: 'taken' | 'skipped',
+  firebaseUid: string,
+) {
+  const today = this.getTodayDateInPalestine();
+
+  const userId = await this.getUserIdByFirebaseUid(firebaseUid);
+
+  const [scheduleTimeRow] = userId
+    ? await this.db
+        .select({ id: schema.scheduleTime.id })
+        .from(schema.scheduleTime)
+        .innerJoin(
+          schema.userMedication,
+          eq(schema.scheduleTime.userMedicationId, schema.userMedication.id),
+        )
+        .where(
+          and(
+            eq(schema.scheduleTime.id, scheduleTimeId),
+            eq(schema.userMedication.userId, userId),
+          ),
+        )
+        .limit(1)
+    : [];
+
+  if (!scheduleTimeRow) {
+    throw new NotFoundException(
+      `schedule time ${scheduleTimeId} was not found`,
+    );
+  }
+
+  const [existing] = await this.db
+    .select()
+    .from(schema.doseLog)
+    .where(
+      and(
+        eq(schema.doseLog.scheduleTimeId, scheduleTimeId),
+        eq(schema.doseLog.date, today),
+      ),
+    )
+    .limit(1);
+
+  if (existing) {
+    const [updated] = await this.db
+      .update(schema.doseLog)
+      .set({ status, markedAt: new Date() })
+      .where(eq(schema.doseLog.id, existing.id))
+      .returning();
+
+    return updated;
+  }
+
+  const [inserted] = await this.db
+    .insert(schema.doseLog)
+    .values({
+      scheduleTimeId,
+      date: today,
+      status,
+    })
+    .returning();
+
+  return inserted;
+}
+}

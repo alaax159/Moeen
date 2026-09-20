@@ -1,0 +1,66 @@
+// Jest Snapshot v1, https://jestjs.io/docs/snapshot-testing
+
+exports[`fallback text, as the patient reads it a check that found nothing 1`] = `
+"Your latest medication safety check found nothing to flag.
+
+Your doctor or pharmacist can answer questions about your medicines.
+
+If you feel unwell or something is worrying you, medical help is available now.
+
+Whether anything about your medicines should change is a decision for your doctor or pharmacist."
+`;
+
+exports[`fallback text, as the patient reads it a contraindicated pair 1`] = `
+"Here is a summary of your latest medication safety check.
+
+Medicine interaction: the check flagged a possible interaction between medicines on your list (rated contraindicated).
+
+Overall, this check is rated contraindicated, the highest level.
+
+Please contact your doctor or pharmacist about this check today.
+
+If you feel unwell or something is worrying you, medical help is available now.
+
+Whether anything about your medicines should change is a decision for your doctor or pharmacist."
+`;
+
+exports[`fallback text, as the patient reads it a missed-dose run with no check behind it 1`] = `
+"We are not able to answer that here.
+
+Your doctor or pharmacist is the right person to ask about a missed dose.
+
+If you feel unwell or something is worrying you, medical help is available now.
+
+Whether anything about your medicines should change is a decision for your doctor or pharmacist."
+`;
+
+exports[`fallback text, as the patient reads it a mixed check, highest severity already resolved by the engine 1`] = `
+"Here is a summary of your latest medication safety check.
+
+Allergy conflict: the check flagged a clash with an allergy recorded on your profile (rated major).
+Medicine interaction: the check flagged a possible interaction between medicines on your list (rated moderate).
+Condition caution: the check flagged a caution linked to a health condition recorded on your profile (rated moderate).
+Overlapping treatment: the check flagged more than one medicine on your list as covering the same ground (rated minor).
+
+Overall, this check is rated major.
+
+Please contact your doctor or pharmacist about this check as soon as you can.
+
+If you feel unwell or something is worrying you, medical help is available now.
+
+Whether anything about your medicines should change is a decision for your doctor or pharmacist."
+`;
+
+exports[`fallback text, as the patient reads it a moderate interaction 1`] = `
+"Here is a summary of your latest medication safety check.
+
+Medicine interaction: the check flagged a possible interaction between medicines on your list (rated moderate).
+
+Overall, this check is rated moderate.
+
+Please contact your doctor or pharmacist about this check when you can.
+
+If you feel unwell or something is worrying you, medical help is available now.
+
+Whether anything about your medicines should change is a decision for your doctor or pharmacist."
+`;

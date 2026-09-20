@@ -1,0 +1,33 @@
+{
+  "cli": {
+    "version": ">= 21.5.0",
+    "appVersionSource": "remote"
+  },
+  "build": {
+    "development": {
+      "developmentClient": true,
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_EMERGENCY_RESPONDER_BASE_URL": "https://chump-frequent-illusion.ngrok-free.dev",
+        "EXPO_PUBLIC_EMERGENCY_RESPONDER_API_BASE_URL": "https://chump-frequent-illusion.ngrok-free.dev"
+      }
+    },
+    "preview": {
+      "distribution": "internal",
+      "env": {
+        "EXPO_PUBLIC_EMERGENCY_RESPONDER_BASE_URL": "https://chump-frequent-illusion.ngrok-free.dev",
+        "EXPO_PUBLIC_EMERGENCY_RESPONDER_API_BASE_URL": "https://chump-frequent-illusion.ngrok-free.dev"
+      }
+    },
+    "production": {
+      "autoIncrement": true,
+      "env": {
+        "EXPO_PUBLIC_EMERGENCY_RESPONDER_BASE_URL": "https://chump-frequent-illusion.ngrok-free.dev",
+        "EXPO_PUBLIC_EMERGENCY_RESPONDER_API_BASE_URL": "https://chump-frequent-illusion.ngrok-free.dev"
+      }
+    }
+  },
+  "submit": {
+    "production": {}
+  }
+}

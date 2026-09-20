@@ -1,0 +1,1 @@
+ALTER TABLE "notification_prefs" ADD COLUMN "emergency_contact_sms_enabled" boolean DEFAULT true NOT NULL;

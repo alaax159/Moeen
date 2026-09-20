@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "1061130562736",
+    "project_id": "moeen-512ea",
+    "storage_bucket": "moeen-512ea.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:1061130562736:android:bb5b7dfb3f644cbc2a9f75",
+        "android_client_info": {
+          "package_name": "com.anonymous.MoeenApp"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAmsoXj6gHpWVM4gNcR_UdEKWQV4q2UjHg"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

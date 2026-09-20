@@ -1,0 +1,160 @@
+{
+  "version": "7",
+  "dialect": "postgresql",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "7",
+      "when": 1787218435091,
+      "tag": "0000_guidance_layer_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1787218448858,
+      "tag": "0001_audit_log_append_only",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1787218474818,
+      "tag": "0002_label_chunk_pgvector",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1787726938058,
+      "tag": "0003_add_dose_log_snooze_count",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "7",
+      "when": 1787813594313,
+      "tag": "0004_expand_medication_names",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1787837927854,
+      "tag": "0005_add_finding_explanation",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1787992490830,
+      "tag": "0006_palestine_medication_catalog",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1788159848484,
+      "tag": "0007_medication_safety_warnings",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1788199858022,
+      "tag": "0008_chat_request_idempotency",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1788227725298,
+      "tag": "0009_chat_request_processing_state",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "7",
+      "when": 1788265886553,
+      "tag": "0010_add_user_medication_updated_at",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "7",
+      "when": 1788353014345,
+      "tag": "0011_add_medication_rxcui",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1788358114143,
+      "tag": "0012_add_medication_safety_warning_affected",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1788358714054,
+      "tag": "0013_bind_chat_session_subject_medication",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1788360026711,
+      "tag": "0014_emergency_access_token_invariant",
+      "breakpoints": true
+    },
+    {
+      "idx": 15,
+      "version": "7",
+      "when": 1788424630968,
+      "tag": "0015_medication_safety_check",
+      "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "7",
+      "when": 1788427628438,
+      "tag": "0016_emergency_contact",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "7",
+      "when": 1788675805726,
+      "tag": "0017_safety_runs_invalidation_and_versioned_embeddings",
+      "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "7",
+      "when": 1788687182058,
+      "tag": "0018_emergency_access_audit",
+      "breakpoints": true
+    },
+    {
+      "idx": 19,
+      "version": "7",
+      "when": 1788687259902,
+      "tag": "0019_emergency_access_audit_baseline",
+      "breakpoints": true
+    },
+    {
+      "idx": 20,
+      "version": "7",
+      "when": 1788727736365,
+      "tag": "0020_emergency_notification_log",
+      "breakpoints": true
+    },
+    {
+      "idx": 21,
+      "version": "7",
+      "when": 1788727750545,
+      "tag": "0021_emergency_contact_sms_preference",
+      "breakpoints": true
+    }
+  ]
+}

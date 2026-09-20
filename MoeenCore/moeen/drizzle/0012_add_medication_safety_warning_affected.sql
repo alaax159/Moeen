@@ -1,0 +1,1 @@
+ALTER TABLE "medication_safety_warnings" ADD COLUMN "affected" text;
